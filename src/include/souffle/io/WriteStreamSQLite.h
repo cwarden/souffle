@@ -18,6 +18,7 @@
 #include "souffle/RecordTable.h"
 #include "souffle/SymbolTable.h"
 #include "souffle/io/WriteStream.h"
+#include "souffle/utility/json11.h"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -38,6 +39,11 @@ public:
             const RecordTable& recordTable)
             : WriteStream(rwOperation, symbolTable, recordTable), dbFilename(getFileName(rwOperation)),
               relationName(rwOperation.at("name")) {
+        std::string err;
+        params = Json::parse(rwOperation.at("params"), err);
+        if (err.length() > 0) {
+            fatal("cannot get internal param names: %s", err);
+        }
         openDB();
         createTables();
         prepareStatements();
@@ -54,6 +60,8 @@ public:
 
 protected:
     void writeNullary() override {}
+
+    Json params;
 
     void writeNextTuple(const RamDomain* tuple) override {
         for (std::size_t i = 0; i < arity; i++) {
@@ -219,11 +227,12 @@ private:
         bool firstWhere = true;
         for (unsigned int i = 0; i < arity; i++) {
             std::string columnName = std::to_string(i);
+            std::string attributeName = params["relation"]["params"][i].dump();
             if (i != 0) {
                 projectionClause << ",";
             }
             if (typeAttributes.at(i)[0] == 's') {
-                projectionClause << "'_symtab_" << columnName << "'.symbol AS '" << columnName << "'";
+                projectionClause << "'_symtab_" << columnName << "'.symbol AS " << attributeName;
                 fromClause << ",'" << symbolTableName << "' AS '_symtab_" << columnName << "'";
                 if (!firstWhere) {
                     whereClause << " AND ";
@@ -233,7 +242,7 @@ private:
                 whereClause << "'_" << relationName << "'.'" << columnName << "' = "
                             << "'_symtab_" << columnName << "'.id";
             } else {
-                projectionClause << "'_" << relationName << "'.'" << columnName << "'";
+                projectionClause << "'_" << relationName << "'.'" << columnName << "' AS " << attributeName;
             }
         }
         createViewText << "SELECT " << projectionClause.str() << " FROM " << fromClause.str();
